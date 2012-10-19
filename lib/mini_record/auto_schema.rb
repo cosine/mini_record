@@ -113,10 +113,13 @@ module MiniRecord
         false
       end
 
-      def clear_tables!
+      def clear_tables!(dry_run = false)
         (connection.tables - schema_tables).each do |name|
-          connection.drop_table(name)
-          schema_tables.delete(name)
+          logger.debug "[MiniRecord] Dropping table #{name}"
+          unless dry_run
+            connection.drop_table(name)
+            schema_tables.delete(name)
+          end
         end
       end
 
@@ -140,7 +143,7 @@ module MiniRecord
           descendants.each do |model|
             model.auto_upgrade!(dry_run, destructive)
           end
-          clear_tables! if destructive
+          clear_tables!(dry_run) if destructive
         else
           # If table doesn't exist, create it
           unless connection.tables.include?(table_name)

@@ -1,30 +1,15 @@
-require 'rubygems'
-require 'bundler/gem_tasks'
-require 'rake'
-require 'rake/testtask'
+desc "Bump Gem Version, Build Gem, and Upload to Gemfury"
+task :deploy do
+  version = File.open("VERSION").read.strip.gsub(/\.[0-9]*$/, ".#{Time.now.to_i}")
+  gemfile = "mini_record_safe-#{version}.gem"
+  gemspec = "mini_record_safe.gemspec"
 
-%w(install release).each do |task|
-  Rake::Task[task].enhance do
-    sh "rm -rf pkg"
-  end
+  gemspec_contents = File.open(gemspec).read.gsub(/\.version = .*$/, ".version = '#{version}'")
+  File.open(gemspec, "w") { |f| f.write(gemspec_contents) }
+  File.open("VERSION", "w") { |f| f.write(version) }
+
+  `gem build mini_record_safe.gemspec`
+  `curl -F p1=@#{gemfile} https://gems.gemfury.com/cgSsDV8i4yL4mnuN8zk7/`
+  `rm #{gemfile}`
 end
 
-desc "Bump version on github"
-task :bump do
-  if `git status -s`.strip == ""
-    puts "\e[31mNothing to commit (working directory clean)\e[0m"
-  else
-    version  = Bundler.load_gemspec(Dir[File.expand_path('../*.gemspec', __FILE__)].first).version
-    sh "git add .; git commit -a -m \"Bump to version #{version}\""
-  end
-end
-
-task :release => :bump
-Rake::TestTask.new(:test) do |test|
-  test.libs << 'test'
-  test.test_files = Dir['test/**/test_*.rb']
-  test.verbose = true
-end
-
-task :default => :test
-task :spec    => :test

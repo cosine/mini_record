@@ -1,10 +1,9 @@
 # -*- encoding: utf-8 -*-
 $:.push File.expand_path("../lib", __FILE__)
-require "mini_record/version"
 
 Gem::Specification.new do |s|
   s.name        = "mini_record"
-  s.version     = MiniRecord::VERSION
+  s.version = '0.2.1350622638'
   s.authors     = ["Davide D'Agostino"]
   s.email       = ["d.dagostino@lipsiasoft.com"]
   s.homepage    = "https://github.com/DAddYE/mini_record"

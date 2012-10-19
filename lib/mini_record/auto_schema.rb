@@ -138,7 +138,7 @@ module MiniRecord
 
         if self == ActiveRecord::Base
           descendants.each do |model|
-            model.auto_upgrade!
+            model.auto_upgrade!(dry_run, destructive)
           end
           clear_tables! if destructive
         else
@@ -231,9 +231,9 @@ module MiniRecord
               new_attr = {}
 
               # First, check if the field type changed
-              if fields[field].sql_type.to_s.downcase != fields_in_db[field].sql_type.to_s.downcase
+              if fields[field].sql_type.to_s.downcase.gsub(/\([0-9]*\)/, "") != fields_in_db[field].sql_type.to_s.downcase.gsub(/\([0-9]*\)/, "")
                 logger.debug "[MiniRecord] Detected schema change for #{table_name}.#{field}#type from " +
-                             "#{fields[field].sql_type.to_s.downcase.inspect} in #{fields_in_db[field].sql_type.to_s.downcase.inspect}" if logger
+                             "#{fields[field].sql_type.to_s.downcase.inspect} to #{fields_in_db[field].sql_type.to_s.downcase.inspect}" if logger
                 changed = true
               end
 
@@ -252,7 +252,7 @@ module MiniRecord
                 value = true if att == :null && value.nil?
                 if value != fields_in_db[field].send(att)
                   logger.debug "[MiniRecord] Detected schema change for #{table_name}.#{field}##{att} "+
-                               "from #{fields_in_db[field].send(att).inspect} in #{value.inspect}" if logger
+                               "from #{fields_in_db[field].send(att).inspect} to #{value.inspect}" if logger
                   new_attr[att] = value
                   changed = true
                 end
@@ -278,7 +278,7 @@ module MiniRecord
           indexes.each do |name, options|
             options = options.dup
             unless connection.indexes(table_name).detect { |i| i.name == name }
-              logger.debug "[MiniRecord] Addming index #{name} on #{table_name}"
+              logger.debug "[MiniRecord] Adding index #{name} on #{table_name}"
               connection.add_index(table_name, options.delete(:column), options) unless dry_run
             end
           end

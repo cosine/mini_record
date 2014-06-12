@@ -260,7 +260,7 @@ module MiniRecord
 
               # First, check if the field type changed
               old_sql_type = get_sql_field_type(fields_in_db[field])
-              new_sql_type = get_sql_Field_type(fields[field])
+              new_sql_type = get_sql_field_type(fields[field])
 
               if old_sql_type != new_sql_type
                 logger.debug "[MiniRecord] Detected schema change for #{table_name}.#{field}#type from " +

@@ -3,7 +3,7 @@ $:.push File.expand_path("../lib", __FILE__)
 
 Gem::Specification.new do |s|
   s.name        = "mini_record_safe"
-  s.version = '0.3.1402560293'
+  s.version = '0.4.1'
   s.authors     = ["Davide D'Agostino"]
   s.email       = ["d.dagostino@lipsiasoft.com"]
   s.homepage    = "https://github.com/DAddYE/mini_record"

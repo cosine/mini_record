@@ -12,6 +12,7 @@ module MiniRecord
           # Rails 3.2 and earlier
           ActiveRecord::ConnectionAdapters::TableDefinition.new(connection)
         when 4
+        when -5
           # Rails 4
           ActiveRecord::ConnectionAdapters::TableDefinition.new(connection.native_database_types, table_name, false, {})
         else

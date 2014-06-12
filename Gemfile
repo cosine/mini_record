@@ -6,6 +6,5 @@ gem 'minitest'
 gem 'sqlite3'
 gem 'mysql2'
 gem 'mysql'
-gem 'pg'
 
 gemspec

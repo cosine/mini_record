@@ -6,6 +6,20 @@ module MiniRecord
 
     module ClassMethods
 
+      def init_table_definition(connection)
+        case ActiveRecord::ConnectionAdapters::TableDefinition.instance_method(:initialize).arity
+        when 1
+          # Rails 3.2 and earlier
+          ActiveRecord::ConnectionAdapters::TableDefinition.new(connection)
+        when 4
+          # Rails 4
+          ActiveRecord::ConnectionAdapters::TableDefinition.new(connection.native_database_types, table_name, false, {})
+        else
+          raise ArgumentError,
+            "Unsupported number of args for ActiveRecord::ConnectionAdapters::TableDefinition.new()"
+        end
+      end
+
       def schema_tables
         @@_schema_tables ||= []
       end
@@ -14,10 +28,10 @@ module MiniRecord
         return superclass.table_definition unless superclass == ActiveRecord::Base
 
         @_table_definition ||= begin
-                                 tb = ActiveRecord::ConnectionAdapters::TableDefinition.new(connection)
-                                 tb.primary_key(primary_key)
-                                 tb
-                               end
+          tb = init_table_definition(connection)
+          tb.primary_key(primary_key)
+          tb
+        end
       end
 
       def indexes
@@ -30,6 +44,16 @@ module MiniRecord
         connection.indexes(table_name).inject({}) do |hash, index|
           hash[index.name] = index
           hash
+        end
+      end
+
+      def get_sql_field_type(field)
+        if field.respond_to?(:sql_type)
+          # Rails 3.2 and earlier
+          field.sql_type.to_s.downcase
+        else
+          # Rails 4
+          connection.type_to_sql(field.type.to_sym, field.limit, field.precision, field.scale)
         end
       end
 
@@ -154,7 +178,7 @@ module MiniRecord
             unless dry_run
               connection.table_definition = table_definition
               connection.create_table(table_name)
-              connection.table_definition = ActiveRecord::ConnectionAdapters::TableDefinition.new(connection)
+              connection.table_definition = init_table_definition(connection)
             end
           end
 
@@ -234,9 +258,12 @@ module MiniRecord
               new_attr = {}
 
               # First, check if the field type changed
-              if fields[field].sql_type.to_s.downcase.gsub(/\([0-9]*\)/, "") != fields_in_db[field].sql_type.to_s.downcase.gsub(/\([0-9]*\)/, "")
+              old_sql_type = get_sql_field_type(fields_in_db[field])
+              new_sql_type = get_sql_Field_type(fields[field])
+
+              if old_sql_type != new_sql_type
                 logger.debug "[MiniRecord] Detected schema change for #{table_name}.#{field}#type from " +
-                             "#{fields[field].sql_type.to_s.downcase.inspect} to #{fields_in_db[field].sql_type.to_s.downcase.inspect}" if logger
+                             "#{old_sql_type.inspect} to #{new_sql_type.inspect}" if logger
                 changed = true
               end
 
@@ -251,7 +278,7 @@ module MiniRecord
               # Next, iterate through our extended attributes, looking for any differences
               # This catches stuff like :null, :precision, etc
               fields[field].each_pair do |att,value|
-                next if att == :type or att == :base or att == :name # special cases
+                next unless [:name, :limit, :precision, :scale, :default, :null].include?(att)
                 value = true if att == :null && value.nil?
                 if value != fields_in_db[field].send(att)
                   logger.debug "[MiniRecord] Detected schema change for #{table_name}.#{field}##{att} "+

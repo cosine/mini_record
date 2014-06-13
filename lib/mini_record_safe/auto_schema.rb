@@ -12,9 +12,11 @@ module MiniRecord
           # Rails 3.2 and earlier
           ActiveRecord::ConnectionAdapters::TableDefinition.new(connection)
         when 4
-        when -5
           # Rails 4
           ActiveRecord::ConnectionAdapters::TableDefinition.new(connection.native_database_types, table_name, false, {})
+        when -5
+          # Rails 4.1
+          ActiveRecord::ConnectionAdapters::TableDefinition.new(connection.native_database_types, table_name, false, {}, nil)
         else
           raise ArgumentError,
             "Unsupported number of args for ActiveRecord::ConnectionAdapters::TableDefinition.new()"
@@ -262,7 +264,7 @@ module MiniRecord
               old_sql_type = get_sql_field_type(fields_in_db[field])
               new_sql_type = get_sql_field_type(fields[field])
 
-              if old_sql_type != new_sql_type
+              if old_sql_type.gsub(/\([0-9]*\)/, "") != new_sql_type.gsub(/\([0-9]*\)/, "")
                 logger.debug "[MiniRecord] Detected schema change for #{table_name}.#{field}#type from " +
                              "#{old_sql_type.inspect} to #{new_sql_type.inspect}" if logger
                 changed = true

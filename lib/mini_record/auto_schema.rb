@@ -23,7 +23,7 @@ module MiniRecord
             "Unsupported number of args for ActiveRecord::ConnectionAdapters::TableDefinition.new()"
         end
       end
-      
+
       def schema_tables
         @@_schema_tables ||= []
       end
@@ -169,11 +169,14 @@ module MiniRecord
         false
       end
 
-      def clear_tables!
-        return unless MiniRecord.configuration.destructive == true 
+      def clear_tables!(dry_run = false)
+        return unless MiniRecord.configuration.destructive == true
         (connection.tables - schema_tables).each do |name|
-          connection.drop_table(name)
-          schema_tables.delete(name)
+          logger.debug "[MiniRecord] Dropping table #{name}"
+          unless dry_run
+            connection.drop_table(name)
+            schema_tables.delete(name)
+          end
         end
       end
 
@@ -185,7 +188,7 @@ module MiniRecord
 
       # Remove foreign keys for indexes with :foreign=>false option
       def remove_foreign_keys
-        return unless MiniRecord.configuration.destructive == true 
+        return unless MiniRecord.configuration.destructive == true
         indexes.each do |name, options|
           if options[:foreign]==false
             foreign_key = foreign_keys.detect { |fk| fk.options[:column] == options[:column].to_s }
@@ -211,21 +214,32 @@ module MiniRecord
         end
       end
 
-      def auto_upgrade!
+      # dry-run
+      def auto_upgrade_dry
+        auto_upgrade!(true)
+      end
+
+      def auto_upgrade!(dry_run = false)
         return unless connection?
         return if respond_to?(:abstract_class?) && abstract_class?
 
         if self == ActiveRecord::Base
-          descendants.each(&:auto_upgrade!)
-          clear_tables!
+          descendants.each do |model|
+            model.auto_upgrade!(dry_run)
+          end
+          clear_tables!(dry_run) if MiniRecord.configuration.destructive == true
         else
           # If table doesn't exist, create it
           unless connection.tables.include?(table_name)
             # TODO: create_table options
             class << connection; attr_accessor :table_definition; end unless connection.respond_to?(:table_definition=)
-            connection.table_definition = table_definition
-            connection.create_table(table_name)
-            connection.table_definition = init_table_definition(connection)
+
+            logger.debug "[MiniRecord] Creating Table #{table_name}"
+            unless dry_run
+              connection.table_definition = table_definition
+              connection.create_table(table_name)
+              connection.table_definition = init_table_definition(connection)
+            end
           end
 
           # Add this to our schema tables
@@ -254,13 +268,19 @@ module MiniRecord
                 unless connection.tables.include?(table.to_s)
                   foreign_key             = association.options[:foreign_key] || association.foreign_key
                   association_foreign_key = association.options[:association_foreign_key] || association.association_foreign_key
-                  connection.create_table(table, :id => false) do |t|
-                    t.integer foreign_key
-                    t.integer association_foreign_key
+                  logger.debug "[MiniRecord] Creating Join Table #{table} with keys #{foreign_key} and #{association_foreign_key}"
+                  unless dry_run
+                    connection.create_table(table, :id => false) do |t|
+                      t.integer foreign_key
+                      t.integer association_foreign_key
+                    end
+                    index_name = connection.index_name(table, :column => [foreign_key, association_foreign_key])
+                    index_name = index_name[0...connection.index_name_length] if index_name.length > connection.index_name_length
+                    connection.add_index table, [foreign_key, association_foreign_key], :name => index_name, :unique => true unless dry_run
                   end
                   index_name = connection.index_name(table, :column => [foreign_key, association_foreign_key])
                   index_name = index_name[0...connection.index_name_length] if index_name.length > connection.index_name_length
-                  connection.add_index table, [foreign_key, association_foreign_key], :name => index_name, :unique => true unless suppressed_indexes[association.name]
+                  connection.add_index table, [foreign_key, association_foreign_key], :name => index_name, :unique => true unless suppressed_indexes[association.name] or dry_run
                 end
                 # Add join table to our schema tables
                 schema_tables << table unless schema_tables.include?(table)
@@ -276,73 +296,100 @@ module MiniRecord
 
           # Group Destructive Actions
           if MiniRecord.configuration.destructive == true 
-            
-            # Rename fields
-            rename_fields.each do |old_name, new_name|
-              old_column = fields_in_db[old_name.to_s]
-              new_column = fields_in_db[new_name.to_s]
-              if old_column && !new_column
-                connection.rename_column(table_name, old_column.name, new_name)
-              end
-            end
-            
-            # Remove fields from db no longer in schema
-            columns_to_delete = fields_in_db.keys - fields.keys & fields_in_db.keys
-            columns_to_delete.each do |field|
-              column = fields_in_db[field]
-              connection.remove_column table_name, column.name
-            end
-            
-            # Change attributes of existent columns
-            (fields.keys & fields_in_db.keys).each do |field|
-              if field != primary_key #ActiveRecord::Base.get_primary_key(table_name)
-                changed  = false  # flag
-                new_attr = {}
-
-                # Special catch for precision/scale, since *both* must be specified together
-                # Always include them in the attr struct, but they'll only get applied if changed = true
-                new_attr[:precision] = fields[field][:precision]
-                new_attr[:scale]     = fields[field][:scale]
-
-                # If we have precision this is also the limit
-                fields[field][:limit] ||= fields[field][:precision]
-
-                # Next, iterate through our extended attributes, looking for any differences
-                # This catches stuff like :null, :precision, etc
-                # Ignore junk attributes that different versions of Rails include
-                [:name, :limit, :precision, :scale, :default, :null].each do |att|
-                  value = fields[field][att]
-                  value = true if att == :null && value.nil?
-
-                  # Skip unspecified limit/precision/scale as DB will set them to defaults,
-                  # and on subsequent runs, this will be erroneously detected as a change.
-                  next if value.nil? and [:limit, :precision, :scale].include?(att)
-
-                  old_value = fields_in_db[field].send(att)
-                  if value != old_value
-                    logger.debug "[MiniRecord] Detected schema change for #{table_name}.#{field}##{att} " +
-                                 "from #{old_value.inspect} to #{value.inspect}" if logger
-                    new_attr[att] = value
-                    changed = true
-                  end
-                end
-
-                # Change the column if applicable
-                new_type = fields[field].type.to_sym
-                connection.change_column table_name, field, new_type, new_attr if changed
-              end
-            end
-            
-            remove_foreign_keys if connection.respond_to?(:foreign_keys)
-
-            # Remove old index
-            index_names = indexes.collect{|name,opts| opts[:name] || name }
-            (indexes_in_db.keys - index_names).each do |name|
-              connection.remove_index(table_name, :name => name)
-            end
-            
+            auto_upgrade_rename_columns!(dry_run)
+            auto_upgrade_remove_columns!(dry_run)
+            auto_upgrade_change_columns!(dry_run)
+            remove_foreign_keys if !dry_run connection.respond_to?(:foreign_keys)
+            auto_upgrade_remove_indexes!(dry_run)
           end
 
+          auto_upgrade_add_columns!(dry_run)
+          auto_upgrade_add_indexes!(dry_run)
+          add_foreign_keys if !dry_run and connection.respond_to?(:foreign_keys)
+
+          # Reload column information
+          reset_column_information
+        end
+      end
+
+      private
+
+      def auto_upgrade_rename_columns!(dry_run)
+        # Rename fields
+        rename_fields.each do |old_name, new_name|
+          old_column = fields_in_db[old_name.to_s]
+          new_column = fields_in_db[new_name.to_s]
+          if old_column && !new_column
+            logger.debug "[MiniRecord] Renaming column #{table_name}.#{old_column.name} to #{new_name}"
+            connection.rename_column(table_name, old_column.name, new_name) unless dry_run
+          end
+        end
+      end
+
+      def auto_upgrade_remove_columns!(dry_run)
+        # Remove fields from db no longer in schema
+        columns_to_delete = fields_in_db.keys - fields.keys & fields_in_db.keys
+        columns_to_delete.each do |field|
+          column = fields_in_db[field]
+          logger.debug "[MiniRecord] Removing column #{table_name}.#{column.name}"
+          connection.remove_column table_name, column.name unless dry_run
+        end
+      end
+
+      def auto_upgrade_change_columns!(dry_run)
+        # Change attributes of existent columns
+        (fields.keys & fields_in_db.keys).each do |field|
+          if field != primary_key #ActiveRecord::Base.get_primary_key(table_name)
+            changed  = false  # flag
+            new_attr = {}
+
+            # Special catch for precision/scale, since *both* must be specified together
+            # Always include them in the attr struct, but they'll only get applied if changed = true
+            new_attr[:precision] = fields[field][:precision]
+            new_attr[:scale]     = fields[field][:scale]
+
+            # If we have precision this is also the limit
+            fields[field][:limit] ||= fields[field][:precision]
+
+            # Next, iterate through our extended attributes, looking for any differences
+            # This catches stuff like :null, :precision, etc
+            # Ignore junk attributes that different versions of Rails include
+            [:name, :limit, :precision, :scale, :default, :null].each do |att|
+              value = fields[field][att]
+              value = true if att == :null && value.nil?
+
+              # Skip unspecified limit/precision/scale as DB will set them to defaults,
+              # and on subsequent runs, this will be erroneously detected as a change.
+              next if value.nil? and [:limit, :precision, :scale].include?(att)
+
+              old_value = fields_in_db[field].send(att)
+              if value != old_value
+                logger.debug "[MiniRecord] Detected schema change for #{table_name}.#{field}##{att} " +
+                             "from #{old_value.inspect} to #{value.inspect}" if logger
+                new_attr[att] = value
+                changed = true
+              end
+            end
+
+            # Change the column if applicable
+            new_type = fields[field].type.to_sym
+            if changed
+              logger.debug "[MiniRecord] Changing column #{table_name}.#{field} to new type #{new_type}"
+              connection.change_column table_name, field, new_type, new_attr unless dry_run
+            end
+          end
+        end
+
+        def auto_upgrade_remove_indexes!(dry_run)
+          # Remove old index
+          index_names = indexes.collect{|name,opts| opts[:name] || name }
+          (indexes_in_db.keys - index_names).each do |name|
+            logger.debug "[MiniRecord] Removing index #{name} on #{table_name}"
+            connection.remove_index(table_name, :name => name) unless dry_run
+          end
+        end
+
+        def auto_upgrade_add_columns!(dry_run)
           # Add fields to db new to schema
           columns_to_add = fields.keys - fields_in_db.keys
           columns_to_add.each do |field|
@@ -350,23 +397,22 @@ module MiniRecord
             options = {:limit => column.limit, :precision => column.precision, :scale => column.scale}
             options[:default] = column.default unless column.default.nil?
             options[:null]    = column.null    unless column.null.nil?
-            connection.add_column table_name, column.name, column.type.to_sym, options
+            logger.debug "[MiniRecord] Adding column #{table_name}.#{column.name}"
+            connection.add_column table_name, column.name, column.type.to_sym, options unless dry_run
           end
+        end
 
+        def auto_upgrade_add_indexes!(dry_run)
           # Add indexes
           indexes.each do |name, options|
             options = options.dup
             index_name = options[:name] || name
             unless connection.indexes(table_name).detect { |i| i.name == index_name }
-              connection.add_index(table_name, options.delete(:column), options)
+              connection.add_index(table_name, options.delete(:column), options) unless dry_run
             end
           end
-
-          add_foreign_keys if connection.respond_to?(:foreign_keys)
-
-          # Reload column information
-          reset_column_information
         end
+
       end
     end # ClassMethods
   end # AutoSchema

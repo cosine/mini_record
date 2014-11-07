@@ -276,11 +276,8 @@ module MiniRecord
                     end
                     index_name = connection.index_name(table, :column => [foreign_key, association_foreign_key])
                     index_name = index_name[0...connection.index_name_length] if index_name.length > connection.index_name_length
-                    connection.add_index table, [foreign_key, association_foreign_key], :name => index_name, :unique => true unless dry_run
+                    connection.add_index table, [foreign_key, association_foreign_key], :name => index_name, :unique => true unless dry_run or suppressed_indexes[association.name]
                   end
-                  index_name = connection.index_name(table, :column => [foreign_key, association_foreign_key])
-                  index_name = index_name[0...connection.index_name_length] if index_name.length > connection.index_name_length
-                  connection.add_index table, [foreign_key, association_foreign_key], :name => index_name, :unique => true unless suppressed_indexes[association.name] or dry_run
                 end
                 # Add join table to our schema tables
                 schema_tables << table unless schema_tables.include?(table)
@@ -299,7 +296,7 @@ module MiniRecord
             auto_upgrade_rename_columns!(dry_run)
             auto_upgrade_remove_columns!(dry_run)
             auto_upgrade_change_columns!(dry_run)
-            remove_foreign_keys if !dry_run connection.respond_to?(:foreign_keys)
+            remove_foreign_keys if !dry_run and connection.respond_to?(:foreign_keys)
             auto_upgrade_remove_indexes!(dry_run)
           end
 

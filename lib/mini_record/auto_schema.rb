@@ -380,7 +380,7 @@ module MiniRecord
 
       def auto_upgrade_remove_indexes!(dry_run)
         # Remove old index
-        index_names = indexes.collect{|name,opts| opts[:name] || name }
+        index_names = indexes.collect{ |name, opts| (opts[:name] || name).to_s }
         (indexes_in_db.keys - index_names).each do |name|
           logger.debug "[MiniRecord] Removing index #{name} on #{table_name}"
           connection.remove_index(table_name, :name => name) unless dry_run
@@ -404,8 +404,9 @@ module MiniRecord
         # Add indexes
         indexes.each do |name, options|
           options = options.dup
-          index_name = options[:name] || name
+          index_name = (options[:name] || name).to_s
           unless connection.indexes(table_name).detect { |i| i.name == index_name }
+            logger.debug "[MiniRecord] Adding index #{index_name} #{options[:column].inspect} on #{table_name}"
             connection.add_index(table_name, options.delete(:column), options) unless dry_run
           end
         end

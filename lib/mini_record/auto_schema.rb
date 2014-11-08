@@ -376,41 +376,41 @@ module MiniRecord
             end
           end
         end
-
-        def auto_upgrade_remove_indexes!(dry_run)
-          # Remove old index
-          index_names = indexes.collect{|name,opts| opts[:name] || name }
-          (indexes_in_db.keys - index_names).each do |name|
-            logger.debug "[MiniRecord] Removing index #{name} on #{table_name}"
-            connection.remove_index(table_name, :name => name) unless dry_run
-          end
-        end
-
-        def auto_upgrade_add_columns!(dry_run)
-          # Add fields to db new to schema
-          columns_to_add = fields.keys - fields_in_db.keys
-          columns_to_add.each do |field|
-            column  = fields[field]
-            options = {:limit => column.limit, :precision => column.precision, :scale => column.scale}
-            options[:default] = column.default unless column.default.nil?
-            options[:null]    = column.null    unless column.null.nil?
-            logger.debug "[MiniRecord] Adding column #{table_name}.#{column.name}"
-            connection.add_column table_name, column.name, column.type.to_sym, options unless dry_run
-          end
-        end
-
-        def auto_upgrade_add_indexes!(dry_run)
-          # Add indexes
-          indexes.each do |name, options|
-            options = options.dup
-            index_name = options[:name] || name
-            unless connection.indexes(table_name).detect { |i| i.name == index_name }
-              connection.add_index(table_name, options.delete(:column), options) unless dry_run
-            end
-          end
-        end
-
       end
+
+      def auto_upgrade_remove_indexes!(dry_run)
+        # Remove old index
+        index_names = indexes.collect{|name,opts| opts[:name] || name }
+        (indexes_in_db.keys - index_names).each do |name|
+          logger.debug "[MiniRecord] Removing index #{name} on #{table_name}"
+          connection.remove_index(table_name, :name => name) unless dry_run
+        end
+      end
+
+      def auto_upgrade_add_columns!(dry_run)
+        # Add fields to db new to schema
+        columns_to_add = fields.keys - fields_in_db.keys
+        columns_to_add.each do |field|
+          column  = fields[field]
+          options = {:limit => column.limit, :precision => column.precision, :scale => column.scale}
+          options[:default] = column.default unless column.default.nil?
+          options[:null]    = column.null    unless column.null.nil?
+          logger.debug "[MiniRecord] Adding column #{table_name}.#{column.name}"
+          connection.add_column table_name, column.name, column.type.to_sym, options unless dry_run
+        end
+      end
+
+      def auto_upgrade_add_indexes!(dry_run)
+        # Add indexes
+        indexes.each do |name, options|
+          options = options.dup
+          index_name = options[:name] || name
+          unless connection.indexes(table_name).detect { |i| i.name == index_name }
+            connection.add_index(table_name, options.delete(:column), options) unless dry_run
+          end
+        end
+      end
+
     end # ClassMethods
   end # AutoSchema
 end # MiniRecord

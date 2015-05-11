@@ -177,8 +177,8 @@ module MiniRecord
         false
       end
 
-      def clear_tables!(dry_run = false)
-        return unless MiniRecord.configuration.destructive == true
+      def clear_tables!(dry_run = false, be_destructive = MiniRecord.configuration.destructive)
+        return unless be_destructive == true
         (connection.tables - schema_tables).each do |name|
           logger.debug "[MiniRecord] Dropping table #{name}" if logger
           unless dry_run
@@ -195,8 +195,8 @@ module MiniRecord
       end
 
       # Remove foreign keys for indexes with :foreign=>false option
-      def remove_foreign_keys(dry_run)
-        return unless MiniRecord.configuration.destructive == true
+      def remove_foreign_keys(dry_run, be_destructive = MiniRecord.configuration.destructive)
+        return unless be_destructive == true
         indexes.each do |name, options|
           if options[:foreign]==false
             foreign_key = foreign_keys.detect { |fk| fk.options[:column] == options[:column].to_s }
@@ -274,13 +274,19 @@ module MiniRecord
         auto_upgrade!(true)
       end
 
-      def auto_upgrade!(dry_run = false)
+      # Dry-run with destructive setting override in order to see what
+      # would happen in that scenario.
+      def auto_upgrade_destructive_dry
+        auto_upgrade!(true, true)
+      end
+
+      def auto_upgrade!(dry_run = false, be_destructive = MiniRecord.configuration.destructive)
         return unless connection?
         return if respond_to?(:abstract_class?) && abstract_class?
 
         if self == ActiveRecord::Base
           descendants.each { |model| model.auto_upgrade!(dry_run) }
-          clear_tables!(dry_run)
+          clear_tables!(dry_run, be_destructive)
         else
           # If table doesn't exist, create it
           unless connection.tables.include?(table_name)
@@ -344,7 +350,7 @@ module MiniRecord
           end
 
           # Group Destructive Actions
-          if MiniRecord.configuration.destructive == true and connection.tables.include?(table_name)
+          if be_destructive == true and connection.tables.include?(table_name)
 
             # Rename fields
             rename_fields.each do |old_name, new_name|
@@ -378,7 +384,7 @@ module MiniRecord
               end
             end
 
-            remove_foreign_keys(dry_run) if connection.respond_to?(:foreign_keys)
+            remove_foreign_keys(dry_run, be_destructive) if connection.respond_to?(:foreign_keys)
 
             # Remove old index
             index_names = indexes.collect{ |name, opts| (opts[:name] || name).to_s }
